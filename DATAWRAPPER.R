@@ -5,7 +5,7 @@ library(dplyr)
 library(stringr)
 
 
-datawrapper_auth(api_key = Sys.getenv("DATAWRAPPER_TOKEN"), overwrite = TRUE)
+datawrapper_auth(api_key = Sys.getenv("CARBURANTI_GITHUB"), overwrite = TRUE)
 
 dw_test_key()
 

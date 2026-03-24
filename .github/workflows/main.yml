@@ -1,0 +1,38 @@
+name: Esegui script prezzi carburanti
+
+on:
+  schedule:
+    # Tutti i giorni alle 07:05 UTC ≈ 08:05 in Italia in inverno
+    - cron: "5 7 * * *"
+  workflow_dispatch:  # per lanciarlo a mano
+
+jobs:
+  run-r-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      # QUI installiamo e cache-iamo i pacchetti
+      - name: Installa (e cache) i pacchetti R
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            github::munichrocker/DatawRappr
+            readr
+            dplyr
+            stringr
+            httr
+          cache-version: 1
+
+      - name: Esegui script carburanti
+        env:
+          DATAWRAPPER_TOKEN: ${{ secrets.DATAWRAPPER_TOKEN }}
+        run: |
+          Rscript DATAWRAPPER.R

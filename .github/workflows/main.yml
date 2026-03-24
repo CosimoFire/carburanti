@@ -4,7 +4,7 @@ on:
   schedule:
     # Tutti i giorni alle 07:05 UTC ≈ 08:05 in Italia in inverno
     - cron: "5 7 * * *"
-  workflow_dispatch:  # per lanciarlo a mano
+  workflow_dispatch:  # per lanciarlo a mano 
 
 jobs:
   run-r-script:

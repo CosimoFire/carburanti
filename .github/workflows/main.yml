@@ -33,6 +33,6 @@ jobs:
 
       - name: Esegui script carburanti
         env:
-          DATAWRAPPER_TOKEN: ${{ secrets.DATAWRAPPER_TOKEN }}
+          DATAWRAPPER_TOKEN: ${{ secrets.CARBURANTI_GITHUB }}
         run: |
           Rscript DATAWRAPPER.R

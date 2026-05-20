@@ -1,0 +1,50 @@
+name: Aggiorna mappa carburanti
+
+on:
+  schedule:
+    - cron: "5 6 * * *"
+
+  workflow_dispatch:
+    inputs:
+      fuel_id:
+        description: "ID carburante (1=Benzina, 2=Gasolio, 3=GPL, 5=Metano, 6=HVO)"
+        required: false
+        default: "1"
+      self_service:
+        description: "Modalità: 1=self, 0=servito"
+        required: false
+        default: "1"
+
+jobs:
+  update-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Esegui script aggiornamento mappa
+        env:
+          DW_API_KEY:  ${{ secrets.DW_API_KEY }}
+          DW_CHART_ID: ${{ secrets.DW_CHART_ID }}
+          FUEL_ID:     ${{ github.event.inputs.fuel_id || '1' }}
+          SELF_SERVICE: ${{ github.event.inputs.self_service || '1' }}
+        run: python scripts/update_map.py
+
+      - name: Salva log come artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ github.run_id }}
+          path: "*.log"
+          retention-days: 7

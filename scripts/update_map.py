@@ -62,6 +62,7 @@ def download_csv(url: str, name: str) -> pd.DataFrame:
         encoding=ENCODING,
         dtype=str,
         on_bad_lines="warn",
+        skiprows=1,
     )
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
     log.info(f"  → {len(df):,} righe, colonne: {list(df.columns)}")

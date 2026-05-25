@@ -24,22 +24,17 @@ log = logging.getLogger(__name__)
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
 PREZZI_URL     = "https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv"
 ANAGRAFICA_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
-SEP            = "|"          # separatore MIMIT dal 10/02/2026
-ENCODING       = "latin-1"   # encoding tipico dei CSV MIMIT
+SEP            = "|"
+ENCODING       = "latin-1"
 
-# ID carburante da monitorare (colonna "id_carburante" nel file prezzi)
-# 1=Benzina, 2=Gasolio, 3=GPL, 5=Metano, 6=HVO — vedi metadati MIMIT
-FUEL_ID = int(os.environ.get("FUEL_ID", "1"))
-
-# self (1) o servito (0) — filtra il campo "self_service"
+FUEL_ID      = int(os.environ.get("FUEL_ID", "1"))
 SELF_SERVICE = int(os.environ.get("SELF_SERVICE", "1"))
 
-# Datawrapper
-DW_API_KEY  = os.environ["DW_API_KEY"]          # secret GitHub
-DW_CHART_ID = os.environ["DW_CHART_ID"]         # es. "AbCd1"
+DW_API_KEY  = os.environ["DW_API_KEY"]
+DW_CHART_ID = os.environ["DW_CHART_ID"]
 DW_BASE     = "https://api.datawrapper.de/v3"
 
-TIMEOUT = 30  # secondi per le richieste HTTP
+TIMEOUT = 30
 
 FUEL_LABELS = {
     1: "Benzina",
@@ -71,42 +66,43 @@ def download_csv(url: str, name: str) -> pd.DataFrame:
 
 # ── JOIN E AGGREGAZIONE ────────────────────────────────────────────────────────
 def build_provincial_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.DataFrame:
-    """
-    Join su id_impianto → filtra carburante e modalità → media per provincia.
-    Restituisce DataFrame con colonne: provincia, media_prezzo, n_impianti
-    """
+    # rinomina colonne per uniformità
+    prezzi     = prezzi.rename(columns={"idimpianto": "id_impianto"})
+    anagrafica = anagrafica.rename(columns={"idimpianto": "id_impianto"})
+
     # normalizza chiave join
     prezzi["id_impianto"]     = prezzi["id_impianto"].str.strip()
     anagrafica["id_impianto"] = anagrafica["id_impianto"].str.strip()
 
     # cast numerici
-    prezzi["id_carburante"] = pd.to_numeric(prezzi["id_carburante"], errors="coerce")
-    prezzi["self_service"]  = pd.to_numeric(prezzi["self_service"],  errors="coerce")
-    prezzi["prezzo"]        = pd.to_numeric(prezzi["prezzo"],        errors="coerce")
+    prezzi["isself"] = pd.to_numeric(prezzi["isself"], errors="coerce")
+    prezzi["prezzo"] = pd.to_numeric(prezzi["prezzo"], errors="coerce")
 
-    # filtro carburante e modalità
-    mask = (prezzi["id_carburante"] == FUEL_ID) & (prezzi["self_service"] == SELF_SERVICE)
+    # filtro carburante per nome e modalità
+    FUEL_NAMES = {
+        1: "Benzina",
+        2: "Gasolio",
+        3: "GPL",
+        5: "Metano",
+        6: "HVO diesel",
+    }
+    fuel_name = FUEL_NAMES.get(FUEL_ID, "Benzina")
+    mask = (
+        prezzi["desccarburante"].str.strip().str.lower() == fuel_name.lower()
+    ) & (prezzi["isself"] == SELF_SERVICE)
     prezzi_filt = prezzi.loc[mask].copy()
-    log.info(f"Prezzi filtrati (fuel={FUEL_ID}, self={SELF_SERVICE}): {len(prezzi_filt):,} righe")
+    log.info(f"Prezzi filtrati (fuel={fuel_name}, self={SELF_SERVICE}): {len(prezzi_filt):,} righe")
 
     if prezzi_filt.empty:
         log.error("Nessun prezzo dopo il filtro. Controlla FUEL_ID e SELF_SERVICE.")
         sys.exit(1)
 
     # join con anagrafica
-    merged = prezzi_filt.merge(anagrafica, on="id_impianto", how="left")
+    merged = prezzi_filt.merge(anagrafica[["id_impianto", "provincia"]], on="id_impianto", how="left")
 
-    # colonna provincia: MIMIT usa "provincia" o "prov" nell'anagrafica
-    prov_col = next((c for c in merged.columns if "provincia" in c or c == "prov"), None)
-    if prov_col is None:
-        log.error(f"Colonna provincia non trovata. Colonne disponibili: {list(merged.columns)}")
-        sys.exit(1)
-
-    merged["provincia"] = merged[prov_col].str.strip().str.upper()
-
-    # escludi province vuote o non riconosciute
+    merged["provincia"] = merged["provincia"].str.strip().str.upper()
     merged = merged.dropna(subset=["provincia", "prezzo"])
-    merged = merged[merged["provincia"].str.len() == 2]  # sigla 2 lettere
+    merged = merged[merged["provincia"].str.len() == 2]
 
     # aggregazione
     agg = (
@@ -138,7 +134,6 @@ def upload_data(chart_id: str, csv_text: str) -> None:
 
 
 def update_metadata(chart_id: str, fuel_label: str, ref_date: str) -> None:
-    """Aggiorna titolo e nota con la data di riferimento."""
     headers = {
         "Authorization": f"Bearer {DW_API_KEY}",
         "Content-Type": "application/json",
@@ -170,7 +165,7 @@ def publish_chart(chart_id: str) -> None:
 # ── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
     log.info("=== START update_map.py ===")
-    ref_date = datetime.utcnow().strftime("%d/%m/%Y")
+    ref_date = datetime.now().strftime("%d/%m/%Y")
     fuel_label = FUEL_LABELS.get(FUEL_ID, f"tipo {FUEL_ID}")
 
     prezzi     = download_csv(PREZZI_URL,     "prezzi_alle_8")
@@ -178,8 +173,6 @@ def main():
 
     agg = build_provincial_avg(prezzi, anagrafica)
 
-    # CSV per Datawrapper: colonne provincia (sigla) + media_prezzo
-    # Datawrapper mappa Italia per provincia usa le sigle ISTAT a 2 lettere
     csv_out = agg[["provincia", "media_prezzo", "n_impianti"]].to_csv(index=False)
     log.info(f"Preview output:\n{agg.head(10).to_string(index=False)}")
 

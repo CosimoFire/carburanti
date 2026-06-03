@@ -76,6 +76,39 @@ PROVINCE_NOMI = {
     "VT": "Viterbo", "VV": "Vibo Valentia",
 }
 
+# ── REGIONI ────────────────────────────────────────────────────────────────────
+PROVINCE_REGIONI = {
+    "AG": "Sicilia", "AL": "Piemonte", "AN": "Marche", "AO": "Valle d'Aosta",
+    "AP": "Marche", "AQ": "Abruzzo", "AR": "Toscana", "AT": "Piemonte",
+    "AV": "Campania", "BA": "Puglia", "BG": "Lombardia", "BI": "Piemonte",
+    "BL": "Veneto", "BN": "Campania", "BO": "Emilia-Romagna", "BR": "Puglia",
+    "BS": "Lombardia", "BT": "Puglia", "BZ": "Trentino-Alto Adige",
+    "CA": "Sardegna", "CB": "Molise", "CE": "Campania", "CH": "Abruzzo",
+    "CL": "Sicilia", "CN": "Piemonte", "CO": "Lombardia", "CR": "Lombardia",
+    "CS": "Calabria", "CT": "Sicilia", "CZ": "Calabria", "EN": "Sicilia",
+    "FC": "Emilia-Romagna", "FE": "Emilia-Romagna", "FG": "Puglia",
+    "FI": "Toscana", "FM": "Marche", "FR": "Lazio", "GE": "Liguria",
+    "GO": "Friuli-Venezia Giulia", "GR": "Toscana", "IM": "Liguria",
+    "IS": "Molise", "KR": "Calabria", "LC": "Lombardia", "LE": "Puglia",
+    "LI": "Toscana", "LO": "Lombardia", "LT": "Lazio", "LU": "Toscana",
+    "MB": "Lombardia", "MC": "Marche", "ME": "Sicilia", "MI": "Lombardia",
+    "MN": "Lombardia", "MO": "Emilia-Romagna", "MS": "Toscana",
+    "MT": "Basilicata", "NA": "Campania", "NO": "Piemonte", "NU": "Sardegna",
+    "OR": "Sardegna", "PA": "Sicilia", "PC": "Emilia-Romagna", "PD": "Veneto",
+    "PE": "Abruzzo", "PG": "Umbria", "PI": "Toscana", "PN": "Friuli-Venezia Giulia",
+    "PO": "Toscana", "PR": "Emilia-Romagna", "PT": "Toscana",
+    "PU": "Marche", "PV": "Lombardia", "PZ": "Basilicata", "RA": "Emilia-Romagna",
+    "RC": "Calabria", "RE": "Emilia-Romagna", "RG": "Sicilia", "RI": "Lazio",
+    "RM": "Lazio", "RN": "Emilia-Romagna", "RO": "Veneto", "SA": "Campania",
+    "SI": "Toscana", "SO": "Lombardia", "SP": "Liguria", "SR": "Sicilia",
+    "SS": "Sardegna", "SU": "Sardegna", "SV": "Liguria", "TA": "Puglia",
+    "TE": "Abruzzo", "TN": "Trentino-Alto Adige", "TO": "Piemonte",
+    "TP": "Sicilia", "TR": "Umbria", "TS": "Friuli-Venezia Giulia",
+    "TV": "Veneto", "UD": "Friuli-Venezia Giulia", "VA": "Lombardia",
+    "VB": "Piemonte", "VC": "Piemonte", "VE": "Veneto", "VI": "Veneto",
+    "VR": "Veneto", "VT": "Lazio", "VV": "Calabria",
+}
+
 
 # ── DOWNLOAD ───────────────────────────────────────────────────────────────────
 def download_csv(url: str, name: str) -> pd.DataFrame:
@@ -100,19 +133,15 @@ def download_csv(url: str, name: str) -> pd.DataFrame:
 
 # ── JOIN E AGGREGAZIONE ────────────────────────────────────────────────────────
 def build_provincial_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.DataFrame:
-    # rinomina colonne per uniformità
     prezzi     = prezzi.rename(columns={"idimpianto": "id_impianto"})
     anagrafica = anagrafica.rename(columns={"idimpianto": "id_impianto"})
 
-    # normalizza chiave join
     prezzi["id_impianto"]     = prezzi["id_impianto"].str.strip()
     anagrafica["id_impianto"] = anagrafica["id_impianto"].str.strip()
 
-    # cast numerici
     prezzi["isself"] = pd.to_numeric(prezzi["isself"], errors="coerce")
     prezzi["prezzo"] = pd.to_numeric(prezzi["prezzo"], errors="coerce")
 
-    # filtro carburante per nome e modalità
     FUEL_NAMES = {
         1: "Benzina",
         2: "Gasolio",
@@ -131,14 +160,12 @@ def build_provincial_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.D
         log.error("Nessun prezzo dopo il filtro. Controlla FUEL_ID e SELF_SERVICE.")
         sys.exit(1)
 
-    # join con anagrafica
     merged = prezzi_filt.merge(anagrafica[["id_impianto", "provincia"]], on="id_impianto", how="left")
 
     merged["provincia"] = merged["provincia"].str.strip().str.upper()
     merged = merged.dropna(subset=["provincia", "prezzo"])
     merged = merged[merged["provincia"].str.len() == 2]
 
-    # aggregazione
     agg = (
         merged.groupby("provincia")
         .agg(
@@ -147,6 +174,7 @@ def build_provincial_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.D
         )
         .reset_index()
     )
+    agg["media_prezzo"] = agg["media_prezzo"].round(3)
     agg["media_prezzo_str"] = agg["media_prezzo"].apply(lambda x: f"{x:.3f}".replace(".", ","))
     agg["nome_provincia"] = agg["provincia"].map(PROVINCE_NOMI)
     agg["regione"] = agg["provincia"].map(PROVINCE_REGIONI)
@@ -209,7 +237,7 @@ def main():
 
     agg = build_provincial_avg(prezzi, anagrafica)
 
-    csv_out = agg[["provincia", "nome_provincia", "media_prezzo", "media_prezzo_str", "n_impianti"]].to_csv(index=False)
+    csv_out = agg[["provincia", "nome_provincia", "regione", "media_prezzo", "media_prezzo_str", "n_impianti"]].to_csv(index=False)
     log.info(f"Preview output:\n{agg.head(10).to_string(index=False)}")
 
     upload_data(DW_CHART_ID, csv_out)

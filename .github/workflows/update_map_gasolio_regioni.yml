@@ -1,4 +1,4 @@
-name: Aggiorna mappa benzina regioni
+name: Aggiorna mappa gasolio regioni
 
 on:
   schedule:
@@ -23,10 +23,10 @@ jobs:
       - name: Installa dipendenze
         run: pip install -r requirements.txt
 
-      - name: Esegui script benzina regioni
+      - name: Esegui script gasolio regioni
         env:
           DW_API_KEY:   ${{ secrets.DW_API_KEY }}
-          DW_CHART_ID:  ${{ secrets.DW_CHART_ID_BENZINA_REGIONI }}
-          FUEL_ID:      "1"
+          DW_CHART_ID:  ${{ secrets.DW_CHART_ID_GASOLIO_REGIONI }}
+          FUEL_ID:      "2"
           SELF_SERVICE: "1"
         run: python scripts/update_map_regioni.py

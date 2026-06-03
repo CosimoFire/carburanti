@@ -208,7 +208,7 @@ def main():
 
     agg = build_provincial_avg(prezzi, anagrafica)
 
-    csv_out = agg[["provincia", "nome_provincia", "media_prezzo", "n_impianti"]].to_csv(index=False)
+    csv_out = agg[["provincia", "nome_provincia", "media_prezzo", "n_impianti"]].to_csv(index=False, decimal=",")
     log.info(f"Preview output:\n{agg.head(10).to_string(index=False)}")
 
     upload_data(DW_CHART_ID, csv_out)

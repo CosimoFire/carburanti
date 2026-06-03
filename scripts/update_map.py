@@ -147,7 +147,7 @@ def build_provincial_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.D
         )
         .reset_index()
     )
-    agg["media_prezzo"] = agg["media_prezzo"].round(3)
+    agg["media_prezzo_str"] = agg["media_prezzo"].apply(lambda x: f"{x:.3f}".replace(".", ","))
     agg["nome_provincia"] = agg["provincia"].map(PROVINCE_NOMI)
     agg = agg.sort_values("provincia")
 
@@ -208,7 +208,7 @@ def main():
 
     agg = build_provincial_avg(prezzi, anagrafica)
 
-    csv_out = agg[["provincia", "nome_provincia", "media_prezzo", "n_impianti"]].to_csv(index=False, decimal=",")
+    csv_out = agg[["provincia", "nome_provincia", "media_prezzo", "media_prezzo_str", "n_impianti"]].to_csv(index=False)
     log.info(f"Preview output:\n{agg.head(10).to_string(index=False)}")
 
     upload_data(DW_CHART_ID, csv_out)

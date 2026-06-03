@@ -1,0 +1,32 @@
+name: Aggiorna mappa benzina regioni
+
+on:
+  schedule:
+    - cron: "5 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  update-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Esegui script benzina regioni
+        env:
+          DW_API_KEY:   ${{ secrets.DW_API_KEY }}
+          DW_CHART_ID:  ${{ secrets.DW_CHART_ID_BENZINA_REGIONI }}
+          FUEL_ID:      "1"
+          SELF_SERVICE: "1"
+        run: python scripts/update_map_regioni.py

@@ -149,6 +149,7 @@ def build_provincial_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.D
     )
     agg["media_prezzo_str"] = agg["media_prezzo"].apply(lambda x: f"{x:.3f}".replace(".", ","))
     agg["nome_provincia"] = agg["provincia"].map(PROVINCE_NOMI)
+    agg["regione"] = agg["provincia"].map(PROVINCE_REGIONI)
     agg = agg.sort_values("provincia")
 
     log.info(f"Province elaborate: {len(agg)}")

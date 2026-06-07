@@ -52,7 +52,10 @@ FUEL_LABELS = {
 def fetch_regional_data() -> pd.DataFrame:
     log.info(f"Download CSV regionale MIMIT: {MIMIT_URL}")
     r = requests.get(MIMIT_URL, timeout=TIMEOUT)
-    r.raise_for_status()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    r = requests.get(MIMIT_URL, timeout=60, headers=headers)
 
     from io import StringIO
     # Prova prima con punto e virgola, poi con virgola

@@ -1,9 +1,9 @@
 """
 update_map_regioni.py
-Scarica il CSV ufficiale MIMIT con le medie regionali
-e aggiorna una mappa Datawrapper via API.
-
-CSV: https://www.mimit.gov.it/images/stories/carburanti/MediaRegionaleStradale.csv
+Calcola la media regionale con metodologia MIMIT:
+- Prezzi in vigore alle ore 8
+- Comunicati entro gli ultimi 8 giorni
+- Benzina e Gasolio self service
 """
 
 import os
@@ -11,7 +11,7 @@ import sys
 import requests
 import pandas as pd
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,8 +21,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
-MIMIT_URL = "https://www.mimit.gov.it/images/stories/carburanti/MediaRegionaleStradale.csv"
-ENCODING  = "latin-1"
+PREZZI_URL     = "https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv"
+ANAGRAFICA_URL = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
+SEP            = "|"
+ENCODING       = "latin-1"
 
 FUEL_ID      = int(os.environ.get("FUEL_ID", "1"))
 SELF_SERVICE = int(os.environ.get("SELF_SERVICE", "1"))
@@ -47,92 +49,122 @@ FUEL_LABELS = {
     5: "Metano",
 }
 
+PROVINCE_REGIONI = {
+    "AG": "Sicilia", "AL": "Piemonte", "AN": "Marche", "AO": "Valle d'Aosta",
+    "AP": "Marche", "AQ": "Abruzzo", "AR": "Toscana", "AT": "Piemonte",
+    "AV": "Campania", "BA": "Puglia", "BG": "Lombardia", "BI": "Piemonte",
+    "BL": "Veneto", "BN": "Campania", "BO": "Emilia-Romagna", "BR": "Puglia",
+    "BS": "Lombardia", "BT": "Puglia", "BZ": "Trentino-Alto Adige",
+    "CA": "Sardegna", "CB": "Molise", "CE": "Campania", "CH": "Abruzzo",
+    "CL": "Sicilia", "CN": "Piemonte", "CO": "Lombardia", "CR": "Lombardia",
+    "CS": "Calabria", "CT": "Sicilia", "CZ": "Calabria", "EN": "Sicilia",
+    "FC": "Emilia-Romagna", "FE": "Emilia-Romagna", "FG": "Puglia",
+    "FI": "Toscana", "FM": "Marche", "FR": "Lazio", "GE": "Liguria",
+    "GO": "Friuli-Venezia Giulia", "GR": "Toscana", "IM": "Liguria",
+    "IS": "Molise", "KR": "Calabria", "LC": "Lombardia", "LE": "Puglia",
+    "LI": "Toscana", "LO": "Lombardia", "LT": "Lazio", "LU": "Toscana",
+    "MB": "Lombardia", "MC": "Marche", "ME": "Sicilia", "MI": "Lombardia",
+    "MN": "Lombardia", "MO": "Emilia-Romagna", "MS": "Toscana",
+    "MT": "Basilicata", "NA": "Campania", "NO": "Piemonte", "NU": "Nuoro",
+    "OR": "Sardegna", "PA": "Sicilia", "PC": "Emilia-Romagna", "PD": "Veneto",
+    "PE": "Abruzzo", "PG": "Umbria", "PI": "Toscana", "PN": "Friuli-Venezia Giulia",
+    "PO": "Toscana", "PR": "Emilia-Romagna", "PT": "Toscana",
+    "PU": "Marche", "PV": "Lombardia", "PZ": "Basilicata", "RA": "Emilia-Romagna",
+    "RC": "Calabria", "RE": "Emilia-Romagna", "RG": "Sicilia", "RI": "Lazio",
+    "RM": "Lazio", "RN": "Emilia-Romagna", "RO": "Veneto", "SA": "Campania",
+    "SI": "Toscana", "SO": "Lombardia", "SP": "Liguria", "SR": "Sicilia",
+    "SS": "Sardegna", "SU": "Sardegna", "SV": "Liguria", "TA": "Puglia",
+    "TE": "Abruzzo", "TN": "Trentino-Alto Adige", "TO": "Piemonte",
+    "TP": "Sicilia", "TR": "Umbria", "TS": "Friuli-Venezia Giulia",
+    "TV": "Veneto", "UD": "Friuli-Venezia Giulia", "VA": "Lombardia",
+    "VB": "Piemonte", "VC": "Piemonte", "VE": "Veneto", "VI": "Veneto",
+    "VR": "Veneto", "VT": "Lazio", "VV": "Calabria",
+}
 
-# ── DOWNLOAD E PARSING ─────────────────────────────────────────────────────────
-def fetch_regional_data() -> pd.DataFrame:
-    log.info(f"Download CSV regionale MIMIT: {MIMIT_URL}")
-    r = requests.get(MIMIT_URL, timeout=TIMEOUT)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    r = requests.get(MIMIT_URL, timeout=60, headers=headers)
 
+# ── DOWNLOAD ───────────────────────────────────────────────────────────────────
+def download_csv(url: str, name: str) -> pd.DataFrame:
+    log.info(f"Download {name}: {url}")
+    r = requests.get(url, timeout=TIMEOUT)
+    r.raise_for_status()
     from io import StringIO
-    # Prova prima con punto e virgola, poi con virgola
-    for sep in [";", ","]:
-        df = pd.read_csv(
-            StringIO(r.text),
-            sep=sep,
-            encoding=ENCODING,
-            dtype=str,
-            on_bad_lines="warn",
-        )
-        if len(df.columns) > 2:
-            break
-
+    df = pd.read_csv(
+        StringIO(r.text),
+        sep=SEP,
+        encoding=ENCODING,
+        dtype=str,
+        on_bad_lines="warn",
+        skiprows=1,
+        keep_default_na=False,
+        na_values=[""],
+    )
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
     log.info(f"  → {len(df):,} righe, colonne: {list(df.columns)}")
-    log.info(df.head(10).to_string())
     return df
 
 
-def build_map_data(df: pd.DataFrame) -> pd.DataFrame:
-    fuel_name    = FUEL_NAMES.get(FUEL_ID, "Benzina")
-    self_label   = "SELF" if SELF_SERVICE == 1 else "SERVITO"
+# ── CALCOLO MEDIA REGIONALE ────────────────────────────────────────────────────
+def build_regional_avg(prezzi: pd.DataFrame, anagrafica: pd.DataFrame) -> pd.DataFrame:
+    prezzi     = prezzi.rename(columns={"idimpianto": "id_impianto"})
+    anagrafica = anagrafica.rename(columns={"idimpianto": "id_impianto"})
 
-    # normalizza tutte le colonne stringa
-    for col in df.columns:
-        df[col] = df[col].str.strip()
+    prezzi["id_impianto"]     = prezzi["id_impianto"].str.strip()
+    anagrafica["id_impianto"] = anagrafica["id_impianto"].str.strip()
 
-    # individua colonne: regione, tipologia, erogazione, prezzo
-    # i nomi esatti dipendono dal CSV — li cerchiamo in modo flessibile
-    col_regione    = next((c for c in df.columns if "regione" in c or "region" in c), None)
-    col_tipologia  = next((c for c in df.columns if "tipologia" in c or "tipo" in c or "carburante" in c), None)
-    col_erogazione = next((c for c in df.columns if "erogazione" in c or "modalit" in c or "self" in c), None)
-    col_prezzo     = next((c for c in df.columns if "prezzo" in c or "media" in c or "valore" in c), None)
+    prezzi["isself"] = pd.to_numeric(prezzi["isself"], errors="coerce")
+    prezzi["prezzo"] = pd.to_numeric(prezzi["prezzo"], errors="coerce")
 
-    log.info(f"Colonne identificate: regione={col_regione}, tipologia={col_tipologia}, erogazione={col_erogazione}, prezzo={col_prezzo}")
+    # ── FILTRO DATA: ultimi 8 giorni (metodologia MIMIT) ──────────────────────
+    # dtcomu formato: GG/MM/AAAA HH:MM:SS
+    prezzi["dtcomu_parsed"] = pd.to_datetime(
+        prezzi["dtcomu"].str.strip(),
+        format="%d/%m/%Y %H:%M:%S",
+        errors="coerce",
+    )
+    cutoff = datetime.now() - timedelta(days=8)
+    prezzi = prezzi[prezzi["dtcomu_parsed"] >= cutoff]
+    log.info(f"Prezzi dopo filtro 8 giorni: {len(prezzi):,}")
 
-    if not all([col_regione, col_tipologia, col_erogazione, col_prezzo]):
-        log.error(f"Colonne non trovate. Colonne disponibili: {list(df.columns)}")
-        sys.exit(1)
-
-    # filtro
+    # ── FILTRO CARBURANTE E MODALITÀ ──────────────────────────────────────────
+    fuel_name = FUEL_NAMES.get(FUEL_ID, "Benzina")
     mask = (
-        df[col_tipologia].str.upper() == fuel_name.upper()
-    ) & (
-        df[col_erogazione].str.upper() == self_label
-    )
-    df_filt = df.loc[mask].copy()
-    log.info(f"Righe filtrate ({fuel_name} {self_label}): {len(df_filt)}")
+        prezzi["desccarburante"].str.strip().str.lower() == fuel_name.lower()
+    ) & (prezzi["isself"] == SELF_SERVICE)
+    prezzi_filt = prezzi.loc[mask].copy()
+    log.info(f"Prezzi filtrati ({fuel_name} self={SELF_SERVICE}): {len(prezzi_filt):,}")
 
-    if df_filt.empty:
-        log.error("Nessuna riga dopo il filtro.")
-        log.error(f"Valori unici tipologia: {df[col_tipologia].unique()}")
-        log.error(f"Valori unici erogazione: {df[col_erogazione].unique()}")
+    if prezzi_filt.empty:
+        log.error("Nessun prezzo dopo il filtro.")
         sys.exit(1)
 
-    df_filt = df_filt.rename(columns={
-        col_regione: "regione",
-        col_prezzo:  "media_prezzo_raw",
-    })
-
-    # converti prezzo (può usare virgola come decimale)
-    df_filt["media_prezzo"] = (
-        df_filt["media_prezzo_raw"]
-        .str.replace(",", ".", regex=False)
-        .pipe(pd.to_numeric, errors="coerce")
+    # ── JOIN CON ANAGRAFICA ───────────────────────────────────────────────────
+    merged = prezzi_filt.merge(
+        anagrafica[["id_impianto", "provincia"]], on="id_impianto", how="left"
     )
-    df_filt = df_filt.dropna(subset=["media_prezzo"])
-    df_filt["media_prezzo"] = df_filt["media_prezzo"].round(3)
-    df_filt["media_prezzo_str"] = df_filt["media_prezzo"].apply(lambda x: f"{x:.3f}".replace(".", ","))
+    merged["provincia"] = merged["provincia"].str.strip().str.upper()
+    merged = merged.dropna(subset=["provincia", "prezzo"])
+    merged = merged[merged["provincia"].str.len() == 2]
+    merged["regione"] = merged["provincia"].map(PROVINCE_REGIONI)
+    merged = merged.dropna(subset=["regione"])
 
-    result = df_filt[["regione", "media_prezzo", "media_prezzo_str"]].copy()
-    result = result.sort_values("regione").reset_index(drop=True)
+    # ── AGGREGAZIONE PER REGIONE ──────────────────────────────────────────────
+    agg = (
+        merged.groupby("regione")
+        .agg(
+            media_prezzo=("prezzo", "mean"),
+            n_impianti=("id_impianto", "nunique"),
+        )
+        .reset_index()
+    )
+    agg["media_prezzo"] = agg["media_prezzo"].round(3)
+    agg["media_prezzo_str"] = agg["media_prezzo"].apply(
+        lambda x: f"{x:.3f}".replace(".", ",")
+    )
+    agg = agg.sort_values("regione").reset_index(drop=True)
 
-    log.info(f"Regioni elaborate: {len(result)}")
-    log.info(result.to_string(index=False))
-    return result
+    log.info(f"Regioni elaborate: {len(agg)}")
+    log.info(agg.to_string(index=False))
+    return agg
 
 
 # ── DATAWRAPPER API ────────────────────────────────────────────────────────────
@@ -182,10 +214,12 @@ def main():
     ref_date   = datetime.now().strftime("%d/%m/%Y")
     fuel_label = FUEL_LABELS.get(FUEL_ID, f"tipo {FUEL_ID}")
 
-    df  = fetch_regional_data()
-    agg = build_map_data(df)
+    prezzi     = download_csv(PREZZI_URL,     "prezzi_alle_8")
+    anagrafica = download_csv(ANAGRAFICA_URL, "anagrafica_impianti")
 
-    csv_out = agg[["regione", "media_prezzo", "media_prezzo_str"]].to_csv(index=False)
+    agg = build_regional_avg(prezzi, anagrafica)
+
+    csv_out = agg[["regione", "media_prezzo", "media_prezzo_str", "n_impianti"]].to_csv(index=False)
 
     upload_data(DW_CHART_ID, csv_out)
     update_metadata(DW_CHART_ID, fuel_label, ref_date)
